@@ -1,1 +1,1 @@
-black sacagawea setup.py && pip install . && sacagawea --help
+black sacagawea setup.py && pip install . && sacagawea test 
