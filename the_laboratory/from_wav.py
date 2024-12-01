@@ -5,19 +5,21 @@ import wave
 import json
 from vosk import Model, KaldiRecognizer
 from deep_translator import GoogleTranslator
+from gtts import gTTS
 
-model_path = "models/vosk-model-small-fa-0.42"
+model_path = "../playground/models/vosk-model-small-fa-0.42/"
 
 model = Model(model_path)
 
 # should be 16000 Hz 16-bit PCM
-wf = wave.open("test.wav", "rb")
+wf = wave.open("../playground/test.wav", "rb")
 
 recognizer = KaldiRecognizer(model, wf.getframerate())
 
 translator = GoogleTranslator(source='auto', target='en')
 
 with open("leslie.txt", "w") as output_file:
+    translated_sentences = []
     while True:
         data = wf.readframes(4000)
         if len(data) == 0:
@@ -30,7 +32,8 @@ with open("leslie.txt", "w") as output_file:
                 if 'text' in result_json:
                     cleaned_text = result_json['text'].replace('\u200c', '')
                     translated_text = translator.translate(cleaned_text)
-                    output_file.write(f"English: {translated_text}\n")
+                    output_file.write(f"{translated_text}\n")
+                    translated_sentences.append(translated_text)
                 else:
                     print("no 'text' key in partial result")
             except json.JSONDecodeError:
@@ -44,9 +47,14 @@ with open("leslie.txt", "w") as output_file:
             cleaned_text = final_result_json['text'].replace('\u200c', '')
             translated_text = translator.translate(cleaned_text)
             output_file.write(f"{translated_text}\n")
+            translated_sentences.append(translated_text)
         else:
             print("no 'text' key in final result")
     except json.JSONDecodeError:
         print("json decode error")
+
+# generate audio
+tts = gTTS(text=" ".join(translated_sentences), lang='en')
+tts.save("translated.wav")
 
 print("done")
