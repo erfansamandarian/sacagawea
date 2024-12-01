@@ -1,4 +1,5 @@
 # converts from persian to english using vosk and deep_translator
+# todo: time stamp for each sentence
 
 import wave
 import json
