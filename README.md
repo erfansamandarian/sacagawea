@@ -25,3 +25,7 @@ live audio capture -> speech recognition -> google translate api -> ms-edge or l
 potential issue: i don't think this stack is fast enough / even feasible to enable this process on the fly
 
 next level: generate voice model of person's voice / persons voices and make the translated tts sound like them
+
+### encoding
+
+\u200c -- Zero-width non-joiner (ZWNJ)
