@@ -23,3 +23,5 @@ youtube video (without captions) -> speech recognition -> google translate api -
 live audio capture -> speech recognition -> google translate api -> ms-edge or local text-to-speech
 
 potential issue: i don't think this stack is fast enough / even feasible to enable this process on the fly
+
+next level: generate voice model of person's voice / persons voices and make the translated tts sound like them
