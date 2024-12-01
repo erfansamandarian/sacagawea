@@ -28,4 +28,4 @@ next level: generate voice model of person's voice / persons voices and make the
 
 ### encoding
 
-\u200c -- Zero-width non-joiner (ZWNJ)
+\u200c -- Zero-width non-joiner (ZWNJ) [todo]
