@@ -101,6 +101,7 @@ def capture_and_transcribe_audio(duration=10):
     q.put(None)
     transcribe_thread.join()
 
+
 def transcribe_audio(filename):
     model = Model("models/vosk-model-en-us-0.42-gigaspeech")
     wf = wave.open(filename, "rb")
