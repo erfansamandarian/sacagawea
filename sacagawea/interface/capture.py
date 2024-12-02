@@ -1,9 +1,10 @@
 import pyaudio
 import wave
-from whisper_mps import whisper
 import json
 import threading
 import queue
+
+from lightning_whisper_mlx import LightningWhisperMLX
 
 
 def list_audio_devices():
@@ -27,12 +28,13 @@ def transcribe_stream(q, p):
                 wf.setsampwidth(p.get_sample_size(pyaudio.paInt16))
                 wf.setframerate(44100)
                 wf.writeframes(buffer[: 44100 * 2 * 5])
-            text = whisper.transcribe("buffer.wav", model="base")
-            if isinstance(text, dict):
-                text_json = text
-            else:
+            whisper = LightningWhisperMLX(model="base", batch_size=12, quant=None)
+            text = whisper.transcribe(audio_path="buffer.wav")["text"]
+            try:
                 text_json = json.loads(text)
-            print(text_json["text"])
+                print(text_json["text"])
+            except json.JSONDecodeError:
+                print(text)
             buffer = buffer[44100 * 2 * 5 :]
             open("buffer.wav", "w").close()
 
