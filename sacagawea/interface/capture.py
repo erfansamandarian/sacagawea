@@ -101,16 +101,6 @@ def capture_and_transcribe_audio(duration=10):
     q.put(None)
     transcribe_thread.join()
 
-    print("finished recording.")
-
-    wf = wave.open("output.wav", "wb")
-    wf.setnchannels(channels)
-    wf.setsampwidth(p.get_sample_size(sample_format))
-    wf.setframerate(fs)
-    wf.writeframes(b"".join(frames))
-    wf.close()
-
-
 def transcribe_audio(filename):
     model = Model("models/vosk-model-en-us-0.42-gigaspeech")
     wf = wave.open(filename, "rb")
