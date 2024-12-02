@@ -1,6 +1,6 @@
 import pyaudio
 import wave
-from vosk import Model, KaldiRecognizer  # change to deepspeech
+from whisper_mps import whisper
 import json
 import threading
 import queue
@@ -14,39 +14,30 @@ def list_audio_devices():
     p.terminate()
 
 
-def transcribe_stream(q, rec):
-    last_words = set()
+def transcribe_stream(q):
+    buffer = b""
     while True:
         data = q.get()
         if data is None:
             break
-        if rec.AcceptWaveform(data):
-            result = rec.Result()
-            text = json.loads(result).get("text", "")
-            words = text.split()
-            for word in words:
-                if word not in last_words:
-                    print(word, end=" ", flush=True)
-                    last_words.add(word)
-        else:
-            partial_result = rec.PartialResult()
-            text = json.loads(partial_result).get("partial", "")
-            words = text.split()
-            for word in words:
-                if word not in last_words:
-                    print(word, end=" ", flush=True)
-                    last_words.add(word)
-    final_result = rec.FinalResult()
-    text = json.loads(final_result).get("text", "")
-    words = text.split()
-    for word in words:
-        if word not in last_words:
-            print(word, end=" ", flush=True)
-            last_words.add(word)
-    print()
+        buffer += data
+        if len(buffer) >= 44100 * 2 * 5:
+            with wave.open("buffer.wav", "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(pyaudio.PyAudio().get_sample_size(pyaudio.paInt16))
+                wf.setframerate(44100)
+                wf.writeframes(buffer[: 44100 * 2 * 5])
+            text = whisper.transcribe("buffer.wav", model="base")
+            if isinstance(text, dict):
+                text_json = text
+            else:
+                text_json = json.loads(text)
+            print(text_json["text"])
+            buffer = buffer[44100 * 2 * 2 :]
+            open("buffer.wav", "w").close()
 
 
-def capture_and_transcribe_audio(duration=10):
+def capture_and_transcribe_audio():
     chunk = 4096
     sample_format = pyaudio.paInt16
     channels = 1
@@ -62,64 +53,30 @@ def capture_and_transcribe_audio(duration=10):
         if "BlackHole" in info["name"]:
             device_index = i
             break
-
-    if device_index is None:
-        raise ValueError("blackhole device not found")
+        elif "MacBook Pro Microphone" in info["name"]:
+            device_index = i
 
     stream = p.open(
         format=sample_format,
         channels=channels,
         rate=fs,
         input=True,
-        input_device_index=device_index,
         frames_per_buffer=chunk,
+        input_device_index=device_index,
     )
 
-    print("recording and transcribing...")
-
-    model = Model("models/vosk-model-en-us-0.42-gigaspeech")
-    rec = KaldiRecognizer(model, fs)
-
-    frames = []
     q = queue.Queue()
-    transcribe_thread = threading.Thread(target=transcribe_stream, args=(q, rec))
-    transcribe_thread.start()
 
-    for _ in range(0, int(fs / chunk * duration)):
-        try:
-            data = stream.read(chunk, exception_on_overflow=False)
-        except IOError as e:
-            print(f"Error recording: {e}")
-            continue
-        frames.append(data)
-        q.put(data)
+    threading.Thread(target=transcribe_stream, args=(q,)).start()
 
+    try:
+        while True:
+            data = stream.read(chunk)
+            q.put(data)
+    except KeyboardInterrupt:
+        pass
+
+    q.put(None)
     stream.stop_stream()
     stream.close()
     p.terminate()
-
-    q.put(None)
-    transcribe_thread.join()
-
-
-def transcribe_audio(filename):
-    model = Model("models/vosk-model-en-us-0.42-gigaspeech")
-    wf = wave.open(filename, "rb")
-    rec = KaldiRecognizer(model, wf.getframerate())
-
-    while True:
-        data = wf.readframes(4000)
-        if len(data) == 0:
-            break
-        if rec.AcceptWaveform(data):
-            result = rec.Result()
-            text = json.loads(result).get("text", "")
-            print(text)
-
-    final_result = rec.FinalResult()
-    text = json.loads(final_result).get("text", "")
-    print(text)
-
-
-if __name__ == "__main__":
-    capture_and_transcribe_audio(duration=10)
