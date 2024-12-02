@@ -1,10 +1,17 @@
-import pyaudio
-import wave
+import argostranslate.package
+import argostranslate.translate
 import json
-import threading
+import pyaudio
 import queue
+import threading
+import warnings
+import wave
 
 from lightning_whisper_mlx import LightningWhisperMLX
+
+warnings.filterwarnings(
+    "ignore", category=FutureWarning, module="stanza.models.tokenize.trainer"
+)
 
 
 def list_audio_devices():
@@ -16,6 +23,31 @@ def list_audio_devices():
 
 
 def transcribe_stream(q, p):
+    from_code = "ru"
+    to_code = "en"
+
+    argostranslate.package.update_package_index()
+    available_packages = argostranslate.package.get_available_packages()
+    package_to_install = next(
+        filter(
+            lambda x: x.from_code == from_code and x.to_code == to_code,
+            available_packages,
+        ),
+        None,
+    )
+    if package_to_install:
+        argostranslate.package.install_from_path(package_to_install.download())
+
+    installed_languages = argostranslate.translate.get_installed_languages()
+    from_lang = next(
+        (lang for lang in installed_languages if lang.code == from_code), None
+    )
+    to_lang = next((lang for lang in installed_languages if lang.code == to_code), None)
+    if from_lang and to_lang:
+        translation = from_lang.get_translation(to_lang)
+    else:
+        translation = None
+
     buffer = b""
     while True:
         data = q.get()
@@ -32,9 +64,16 @@ def transcribe_stream(q, p):
             text = whisper.transcribe(audio_path="buffer.wav")["text"]
             try:
                 text_json = json.loads(text)
-                print(text_json["text"])
+                original_text = text_json["text"]
+                print(original_text)
+                if translation:
+                    translated_text = translation.translate(original_text)
+                    print(translated_text)
             except json.JSONDecodeError:
                 print(text)
+                if translation:
+                    translated_text = translation.translate(text)
+                    print(translated_text)
             buffer = buffer[44100 * 2 * 5 :]
             open("buffer.wav", "w").close()
 
