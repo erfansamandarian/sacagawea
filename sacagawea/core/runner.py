@@ -10,6 +10,6 @@ class Runner:
         return f"{self.config}"
 
     def run(self):
-        print(f"model: {self.config.model}")
-
-        capture_and_transcribe_audio()
+        print("Starting Program")
+        capture_and_transcribe_audio(self.config.from_code, self.config.to_code)
+        print("Ending Program")

@@ -22,9 +22,9 @@ def list_audio_devices():
     p.terminate()
 
 
-def transcribe_stream(q, p):
-    from_code = "ru"
-    to_code = "en"
+def transcribe_stream(q, p, from_code, to_code):
+    from_code = from_code
+    to_code = to_code
 
     argostranslate.package.update_package_index()
     available_packages = argostranslate.package.get_available_packages()
@@ -78,7 +78,7 @@ def transcribe_stream(q, p):
             open("buffer.wav", "w").close()
 
 
-def capture_and_transcribe_audio():
+def capture_and_transcribe_audio(from_code="ru", to_code="en"):
     chunk = 4096
     sample_format = pyaudio.paInt16
     channels = 1
@@ -108,7 +108,7 @@ def capture_and_transcribe_audio():
 
     q = queue.Queue()
 
-    threading.Thread(target=transcribe_stream, args=(q, p)).start()
+    threading.Thread(target=transcribe_stream, args=(q, p, from_code, to_code)).start()
 
     try:
         while True:
