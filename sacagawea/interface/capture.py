@@ -14,7 +14,7 @@ def list_audio_devices():
     p.terminate()
 
 
-def transcribe_stream(q):
+def transcribe_stream(q, p):
     buffer = b""
     while True:
         data = q.get()
@@ -24,7 +24,7 @@ def transcribe_stream(q):
         if len(buffer) >= 44100 * 2 * 5:
             with wave.open("buffer.wav", "wb") as wf:
                 wf.setnchannels(1)
-                wf.setsampwidth(pyaudio.PyAudio().get_sample_size(pyaudio.paInt16))
+                wf.setsampwidth(p.get_sample_size(pyaudio.paInt16))
                 wf.setframerate(44100)
                 wf.writeframes(buffer[: 44100 * 2 * 5])
             text = whisper.transcribe("buffer.wav", model="base")
@@ -67,7 +67,7 @@ def capture_and_transcribe_audio():
 
     q = queue.Queue()
 
-    threading.Thread(target=transcribe_stream, args=(q,)).start()
+    threading.Thread(target=transcribe_stream, args=(q, p)).start()
 
     try:
         while True:
