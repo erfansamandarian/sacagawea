@@ -33,7 +33,7 @@ def transcribe_stream(q):
             else:
                 text_json = json.loads(text)
             print(text_json["text"])
-            buffer = buffer[44100 * 2 * 2 :]
+            buffer = buffer[44100 * 2 * 5 :]
             open("buffer.wav", "w").close()
 
 
