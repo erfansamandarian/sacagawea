@@ -3,6 +3,7 @@ import argostranslate.translate
 import json
 import pyaudio
 import queue
+import subprocess
 import threading
 import warnings
 import wave
@@ -16,10 +17,31 @@ warnings.filterwarnings(
 
 def list_audio_devices():
     p = pyaudio.PyAudio()
+    info_list = []
     for i in range(p.get_device_count()):
         info = p.get_device_info_by_index(i)
-        print(f"device {i}: {info['name']}")
+        info_list.append((i, info["name"]))
     p.terminate()
+    return info_list
+
+
+speak_queue = queue.Queue()
+
+
+def speech_worker():
+    while True:
+        text = speak_queue.get()
+        if text is None:
+            break
+        try:
+            subprocess.run(["say", text], check=True)
+        except subprocess.SubprocessError as e:
+            print(f"Speech Error ({type(e).__name__}): {str(e)}")
+        speak_queue.task_done()
+
+
+speech_thread = threading.Thread(target=speech_worker)
+speech_thread.start()
 
 
 def transcribe_stream(q, p, from_code, to_code):
@@ -63,17 +85,22 @@ def transcribe_stream(q, p, from_code, to_code):
             whisper = LightningWhisperMLX(model="base", batch_size=12, quant=None)
             text = whisper.transcribe(audio_path="buffer.wav")["text"]
             try:
-                text_json = json.loads(text)
-                original_text = text_json["text"]
-                print(original_text)
-                if translation:
-                    translated_text = translation.translate(original_text)
-                    print(translated_text)
-            except json.JSONDecodeError:
-                print(text)
-                if translation:
-                    translated_text = translation.translate(text)
-                    print(translated_text)
+                if text.strip():
+                    text_json = json.loads(text)
+                    original_text = text_json["text"]
+                    if translation:
+                        translated_text = translation.translate(original_text)
+                        print(f"{original_text}\n{translated_text}\n")
+                        speak_queue.put(translated_text)
+            except json.JSONDecodeError as e:
+                print(f"JSON Error ({type(e).__name__}): {str(e)}")
+                if text.strip():
+                    if translation:
+                        translated_text = translation.translate(text)
+                        print(f"{text}\n{translated_text}\n")
+                        speak_queue.put(translated_text)
+            except Exception as e:
+                print(f"Unexpected Error ({type(e).__name__}): {str(e)}")
             buffer = buffer[44100 * 2 * 5 :]
             open("buffer.wav", "w").close()
 
@@ -86,16 +113,14 @@ def capture_and_transcribe_audio(from_code="ru", to_code="en"):
 
     p = pyaudio.PyAudio()
 
-    list_audio_devices()
-
+    devices = list_audio_devices()
     device_index = None
-    for i in range(p.get_device_count()):
-        info = p.get_device_info_by_index(i)
-        if "BlackHole" in info["name"]:
-            device_index = i
+    for idx, name in devices:
+        if "BlackHole" in name:
+            device_index = idx
             break
-        elif "MacBook Pro Microphone" in info["name"]:
-            device_index = i
+        elif "MacBook Pro Microphone" in name:
+            device_index = idx
 
     stream = p.open(
         format=sample_format,
@@ -121,3 +146,6 @@ def capture_and_transcribe_audio(from_code="ru", to_code="en"):
     stream.stop_stream()
     stream.close()
     p.terminate()
+
+    speak_queue.put(None)
+    speech_thread.join()
