@@ -38,17 +38,23 @@ setup(
         "rfc3986",
         "sniffio",
         "soundfile",
+        "argostranslate",
         "soupsieve",
         "srt",
         "tqdm",
         "urllib3",
         "vosk",
         "websockets",
+        "PyQt6",
+        "lightning_whisper_mlx",
     ],
     py_modules=["sacagawea"],
     entry_points={
         "console_scripts": [
             "sacagawea=sacagawea.sacagawea:main",
+        ],
+        "gui_scripts": [
+            "sacagawea-gui=sacagawea.sacagawea:main",
         ],
     },
 )
