@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QWidget,
     QTextEdit,
     QLabel,
+    QCheckBox,
 )
 from PyQt6.QtCore import QThread, pyqtSignal
 import sys
@@ -84,6 +85,12 @@ class MainWindow(QMainWindow):
         control_layout.addWidget(QLabel("Model:"))
         control_layout.addWidget(self.model_select)
         control_layout.addWidget(self.toggle_button)
+
+        self.speak_checkbox = QCheckBox("Speak translations")
+        self.speak_checkbox.setChecked(True)
+        self.speak_checkbox.stateChanged.connect(self.toggle_speech)
+        control_layout.addWidget(self.speak_checkbox)
+
         layout.addLayout(control_layout)
 
         self.original_text = QTextEdit()
@@ -138,6 +145,10 @@ class MainWindow(QMainWindow):
     def update_output(self, original, translated):
         self.original_text.append(original)
         self.translated_text.append(translated)
+
+    def toggle_speech(self):
+        if self.capture_manager:
+            self.capture_manager.speak_enabled = self.speak_checkbox.isChecked()
 
     def closeEvent(self, event):
         self.stop_translation()
