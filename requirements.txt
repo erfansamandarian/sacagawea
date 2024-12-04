@@ -58,5 +58,4 @@ torch==2.5.1
 tqdm==4.67.1
 typing_extensions==4.12.2
 urllib3==2.2.3
-vosk==0.3.44
 websockets==14.1
