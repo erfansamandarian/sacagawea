@@ -7,7 +7,6 @@ import subprocess
 import threading
 import warnings
 import wave
-
 from lightning_whisper_mlx import LightningWhisperMLX
 
 warnings.filterwarnings(
@@ -25,127 +24,230 @@ def list_audio_devices():
     return info_list
 
 
-speak_queue = queue.Queue()
+class SpeechManager:
+    _instance = None
 
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._instance._initialize()
+        return cls._instance
 
-def speech_worker():
-    while True:
-        text = speak_queue.get()
-        if text is None:
-            break
-        try:
-            subprocess.run(["say", text], check=True)
-        except subprocess.SubprocessError as e:
-            print(f"Speech Error ({type(e).__name__}): {str(e)}")
-        speak_queue.task_done()
+    def _initialize(self):
+        self.queue = queue.Queue()
+        self.thread = None
+        self.running = False
+        self.start_thread()
 
+    def start_thread(self):
+        if self.thread is not None:
+            return
+        self.running = True
+        self.thread = threading.Thread(target=self._speech_worker)
+        self.thread.daemon = True
+        self.thread.start()
 
-speech_thread = threading.Thread(target=speech_worker)
-speech_thread.start()
+    def stop_thread(self):
+        self.running = False
+        if self.queue:
+            while not self.queue.empty():
+                try:
+                    self.queue.get_nowait()
+                except queue.Empty:
+                    pass
+            self.queue.put(None)
+        if self.thread:
+            self.thread.join(timeout=1)
+            self.thread = None
 
-
-def transcribe_stream(q, p, from_code, to_code):
-    from_code = from_code
-    to_code = to_code
-
-    argostranslate.package.update_package_index()
-    available_packages = argostranslate.package.get_available_packages()
-    package_to_install = next(
-        filter(
-            lambda x: x.from_code == from_code and x.to_code == to_code,
-            available_packages,
-        ),
-        None,
-    )
-    if package_to_install:
-        argostranslate.package.install_from_path(package_to_install.download())
-
-    installed_languages = argostranslate.translate.get_installed_languages()
-    from_lang = next(
-        (lang for lang in installed_languages if lang.code == from_code), None
-    )
-    to_lang = next((lang for lang in installed_languages if lang.code == to_code), None)
-    if from_lang and to_lang:
-        translation = from_lang.get_translation(to_lang)
-    else:
-        translation = None
-
-    buffer = b""
-    while True:
-        data = q.get()
-        if data is None:
-            break
-        buffer += data
-        if len(buffer) >= 44100 * 2 * 5:
-            with wave.open("buffer.wav", "wb") as wf:
-                wf.setnchannels(1)
-                wf.setsampwidth(p.get_sample_size(pyaudio.paInt16))
-                wf.setframerate(44100)
-                wf.writeframes(buffer[: 44100 * 2 * 5])
-            whisper = LightningWhisperMLX(model="base", batch_size=12, quant=None)
-            text = whisper.transcribe(audio_path="buffer.wav")["text"]
+    def _speech_worker(self):
+        while self.running:
             try:
-                if text.strip():
-                    text_json = json.loads(text)
-                    original_text = text_json["text"]
-                    if translation:
-                        translated_text = translation.translate(original_text)
-                        print(f"{original_text}\n{translated_text}\n")
-                        speak_queue.put(translated_text)
-            except json.JSONDecodeError as e:
-                print(f"JSON Error ({type(e).__name__}): {str(e)}")
-                if text.strip():
-                    if translation:
-                        translated_text = translation.translate(text)
-                        print(f"{text}\n{translated_text}\n")
-                        speak_queue.put(translated_text)
+                text = self.queue.get(timeout=0.5)
+                if text is None or not self.running:
+                    break
+                subprocess.run(["say", text], check=True)
+            except queue.Empty:
+                continue
+            except subprocess.SubprocessError as e:
+                print(f"Speech Error ({type(e).__name__}): {str(e)}")
+            finally:
+                try:
+                    self.queue.task_done()
+                except ValueError:
+                    pass
+
+    def say(self, text):
+        if self.running:
+            self.queue.put(text)
+
+
+speech_manager = SpeechManager()
+
+
+class CaptureManager:
+    def __init__(self):
+        self.from_code = None
+        self.to_code = None
+        self.model = None
+        self.running = False
+        self.thread = None
+        self.stream = None
+        self.p = None
+        self.q = None
+        self.speak_enabled = True
+        self.process_thread = None
+        self.speech_manager = speech_manager
+
+    def configure(self, from_code, to_code, model):
+        self.from_code = from_code
+        self.to_code = to_code
+        self.model = model
+
+    def start_capture(self, signal):
+        if self.running:
+            return
+
+        self.running = True
+        self.p = pyaudio.PyAudio()
+        self.q = queue.Queue()
+
+        chunk = 4096
+        sample_format = pyaudio.paInt16
+        channels = 1
+        fs = 44100
+
+        devices = list_audio_devices()
+        device_index = None
+        for idx, name in devices:
+            if "BlackHole" in name:
+                device_index = idx
+                break
+            elif "MacBook Pro Microphone" in name:
+                device_index = idx
+
+        self.stream = self.p.open(
+            format=sample_format,
+            channels=channels,
+            rate=fs,
+            input=True,
+            frames_per_buffer=chunk,
+            input_device_index=device_index,
+        )
+
+        def transcribe_wrapper():
+            try:
+                while self.running:
+                    data = self.stream.read(chunk)
+                    self.q.put(data)
             except Exception as e:
-                print(f"Unexpected Error ({type(e).__name__}): {str(e)}")
-            buffer = buffer[44100 * 2 * 5 :]
-            open("buffer.wav", "w").close()
+                print(f"Capture Error: {str(e)}")
+            finally:
+                self.q.put(None)
 
+        self.thread = threading.Thread(target=transcribe_wrapper)
+        self.thread.start()
 
-def capture_and_transcribe_audio(from_code="ru", to_code="en"):
-    chunk = 4096
-    sample_format = pyaudio.paInt16
-    channels = 1
-    fs = 44100
+        self.process_thread = threading.Thread(
+            target=self._process_transcription, args=(signal,)
+        )
+        self.process_thread.start()
 
-    p = pyaudio.PyAudio()
+    def _process_transcription(self, signal):
+        buffer = b""
+        while self.running:
+            try:
+                data = self.q.get()
+                if data is None:
+                    break
 
-    devices = list_audio_devices()
-    device_index = None
-    for idx, name in devices:
-        if "BlackHole" in name:
-            device_index = idx
-            break
-        elif "MacBook Pro Microphone" in name:
-            device_index = idx
+                buffer += data
+                if len(buffer) >= 44100 * 2 * 5:
+                    with wave.open("buffer.wav", "wb") as wf:
+                        wf.setnchannels(1)
+                        wf.setsampwidth(self.p.get_sample_size(pyaudio.paInt16))
+                        wf.setframerate(44100)
+                        wf.writeframes(buffer[: 44100 * 2 * 5])
+                    whisper = LightningWhisperMLX(
+                        model=self.model, batch_size=12, quant=None
+                    )
+                    text = whisper.transcribe(audio_path="buffer.wav")["text"]
 
-    stream = p.open(
-        format=sample_format,
-        channels=channels,
-        rate=fs,
-        input=True,
-        frames_per_buffer=chunk,
-        input_device_index=device_index,
-    )
+                    if text.strip():
+                        translated = self._translate_text(text)
+                        if signal:
+                            signal.emit(text, translated)
+                        if self.speak_enabled:
+                            self.speech_manager.say(translated)
 
-    q = queue.Queue()
+                    buffer = buffer[44100 * 2 * 5 :]
+                    open("buffer.wav", "w").close()
+            except Exception as e:
+                print(f"Processing Error: {str(e)}")
 
-    threading.Thread(target=transcribe_stream, args=(q, p, from_code, to_code)).start()
+    def _translate_text(self, text):
+        try:
+            text_json = json.loads(text)
+            text = text_json["text"]
+        except json.JSONDecodeError:
+            pass
 
-    try:
-        while True:
-            data = stream.read(chunk)
-            q.put(data)
-    except KeyboardInterrupt:
-        pass
+        argostranslate.package.update_package_index()
+        available_packages = argostranslate.package.get_available_packages()
+        package_to_install = next(
+            filter(
+                lambda x: x.from_code == self.from_code and x.to_code == self.to_code,
+                available_packages,
+            ),
+            None,
+        )
+        if package_to_install:
+            argostranslate.package.install_from_path(package_to_install.download())
 
-    q.put(None)
-    stream.stop_stream()
-    stream.close()
-    p.terminate()
+        installed_languages = argostranslate.translate.get_installed_languages()
+        from_lang = next(
+            (lang for lang in installed_languages if lang.code == self.from_code), None
+        )
+        to_lang = next(
+            (lang for lang in installed_languages if lang.code == self.to_code), None
+        )
 
-    speak_queue.put(None)
-    speech_thread.join()
+        if from_lang and to_lang:
+            translation = from_lang.get_translation(to_lang)
+            return translation.translate(text)
+        return text
+
+    def stop_capture(self):
+        self.running = False
+
+        self.speech_manager.stop_thread()
+
+        if self.stream:
+            self.stream.stop_stream()
+            self.stream.close()
+
+        if self.q:
+            self.q.put(None)
+
+        if self.thread:
+            self.thread.join()
+        if self.process_thread:
+            self.process_thread.join()
+
+        if self.p:
+            self.p.terminate()
+
+        if self.speak_enabled:
+            speak_queue.put(None)
+            try:
+                speak_queue.join()
+            except:
+                pass
+
+        self.stream = None
+        self.p = None
+        self.thread = None
+        self.process_thread = None
+        self.q = None
+
+        self.speech_manager.start_thread()
