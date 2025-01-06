@@ -29,3 +29,16 @@ next level: generate voice model of person's voice / persons voices and make the
 ### encoding
 
 \u200c -- Zero-width non-joiner (ZWNJ) [todo]
+
+## Optimization
+
+To optimize the program, follow these steps:
+
+1. Refactor `sacagawea/interface/capture.py` to remove redundant code and improve performance.
+2. Use asynchronous programming to handle audio capture and processing in `sacagawea/interface/capture.py`.
+3. Optimize the `_process_transcription` method in `sacagawea/interface/capture.py` to reduce latency.
+4. Reduce the number of threads used for translation in `sacagawea/interface/gui.py`.
+5. Use asynchronous programming for GUI updates in `sacagawea/interface/gui.py`.
+6. Optimize the `update_output` method in `sacagawea/interface/gui.py` to improve performance.
+7. Remove unnecessary dependencies from `requirements.txt` to reduce the size of the application.
+8. Update `compile.command` to use a more efficient code formatter and package installer.

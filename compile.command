@@ -1,1 +1,1 @@
-black sacagawea setup.py && pip install . && sacagawea --gui
+black sacagawea setup.py && pip install --upgrade pip && pip install . && sacagawea --gui

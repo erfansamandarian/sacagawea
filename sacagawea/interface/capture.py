@@ -4,9 +4,10 @@ import json
 import pyaudio
 import queue
 import subprocess
-import threading
 import warnings
 import wave
+import asyncio
+from concurrent.futures import ThreadPoolExecutor
 from lightning_whisper_mlx import LightningWhisperMLX
 
 warnings.filterwarnings(
@@ -35,19 +36,16 @@ class SpeechManager:
 
     def _initialize(self):
         self.queue = queue.Queue()
-        self.thread = None
         self.running = False
-        self.start_thread()
 
-    def start_thread(self):
-        if self.thread is not None:
+    async def start_thread(self):
+        if self.running:
             return
         self.running = True
-        self.thread = threading.Thread(target=self._speech_worker)
-        self.thread.daemon = True
-        self.thread.start()
+        loop = asyncio.get_event_loop()
+        self.thread = loop.run_in_executor(None, self._speech_worker)
 
-    def stop_thread(self):
+    async def stop_thread(self):
         self.running = False
         if self.queue:
             while not self.queue.empty():
@@ -57,8 +55,7 @@ class SpeechManager:
                     pass
             self.queue.put(None)
         if self.thread:
-            self.thread.join(timeout=1)
-            self.thread = None
+            await self.thread
 
     def _speech_worker(self):
         while self.running:
@@ -91,12 +88,10 @@ class CaptureManager:
         self.to_code = None
         self.model = None
         self.running = False
-        self.thread = None
         self.stream = None
         self.p = None
         self.q = None
         self.speak_enabled = True
-        self.process_thread = None
         self.speech_manager = speech_manager
 
     def configure(self, from_code, to_code, model):
@@ -104,7 +99,7 @@ class CaptureManager:
         self.to_code = to_code
         self.model = model
 
-    def start_capture(self, signal):
+    async def start_capture(self, signal):
         if self.running:
             return
 
@@ -135,29 +130,26 @@ class CaptureManager:
             input_device_index=device_index,
         )
 
-        def transcribe_wrapper():
-            try:
-                while self.running:
-                    data = self.stream.read(chunk)
-                    self.q.put(data)
-            except Exception as e:
-                print(f"Capture Error: {str(e)}")
-            finally:
-                self.q.put(None)
+        loop = asyncio.get_event_loop()
+        self.transcribe_task = loop.run_in_executor(None, self._transcribe_wrapper)
+        self.process_task = loop.create_task(self._process_transcription(signal))
 
-        self.thread = threading.Thread(target=transcribe_wrapper)
-        self.thread.start()
+    def _transcribe_wrapper(self):
+        chunk = 4096
+        try:
+            while self.running:
+                data = self.stream.read(chunk)
+                self.q.put(data)
+        except Exception as e:
+            print(f"Capture Error: {str(e)}")
+        finally:
+            self.q.put(None)
 
-        self.process_thread = threading.Thread(
-            target=self._process_transcription, args=(signal,)
-        )
-        self.process_thread.start()
-
-    def _process_transcription(self, signal):
+    async def _process_transcription(self, signal):
         buffer = b""
         while self.running:
             try:
-                data = self.q.get()
+                data = await asyncio.get_event_loop().run_in_executor(None, self.q.get)
                 if data is None:
                     break
 
@@ -174,7 +166,9 @@ class CaptureManager:
                     text = whisper.transcribe(audio_path="buffer.wav")["text"]
 
                     if text.strip():
-                        translated = self._translate_text(text)
+                        translated = await asyncio.get_event_loop().run_in_executor(
+                            None, self._translate_text, text
+                        )
                         if signal:
                             signal.emit(text, translated)
                         if self.speak_enabled:
@@ -217,10 +211,10 @@ class CaptureManager:
             return translation.translate(text)
         return text
 
-    def stop_capture(self):
+    async def stop_capture(self):
         self.running = False
 
-        self.speech_manager.stop_thread()
+        await self.speech_manager.stop_thread()
 
         if self.stream:
             self.stream.stop_stream()
@@ -229,25 +223,18 @@ class CaptureManager:
         if self.q:
             self.q.put(None)
 
-        if self.thread:
-            self.thread.join()
-        if self.process_thread:
-            self.process_thread.join()
+        if self.transcribe_task:
+            await self.transcribe_task
+        if self.process_task:
+            await self.process_task
 
         if self.p:
             self.p.terminate()
 
-        if self.speak_enabled:
-            speak_queue.put(None)
-            try:
-                speak_queue.join()
-            except:
-                pass
-
         self.stream = None
         self.p = None
-        self.thread = None
-        self.process_thread = None
+        self.transcribe_task = None
+        self.process_task = None
         self.q = None
 
-        self.speech_manager.start_thread()
+        await self.speech_manager.start_thread()

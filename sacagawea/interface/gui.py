@@ -10,14 +10,15 @@ from PyQt6.QtWidgets import (
     QLabel,
     QCheckBox,
 )
-from PyQt6.QtCore import QThread, pyqtSignal
+from PyQt6.QtCore import QThread, pyqtSignal, QObject, QEventLoop, QTimer
 import sys
 from sacagawea.interface.capture import CaptureManager
 from sacagawea.core.config import Config
 from types import SimpleNamespace
+import asyncio
 
 
-class TranslationWorker(QThread):
+class TranslationWorker(QObject):
     output_signal = pyqtSignal(str, str)
 
     def __init__(self, capture_manager):
@@ -25,14 +26,13 @@ class TranslationWorker(QThread):
         self.capture_manager = capture_manager
         self.is_running = True
 
-    def run(self):
-        self.capture_manager.start_capture(self.output_signal)
+    async def run(self):
+        await self.capture_manager.start_capture(self.output_signal)
 
-    def stop(self):
+    async def stop(self):
         self.is_running = False
         if self.capture_manager:
-            self.capture_manager.stop_capture()
-            self.wait()
+            await self.capture_manager.stop_capture()
 
 
 class MainWindow(QMainWindow):
@@ -131,14 +131,13 @@ class MainWindow(QMainWindow):
 
         self.worker = TranslationWorker(self.capture_manager)
         self.worker.output_signal.connect(self.update_output)
-        self.worker.start()
+        asyncio.create_task(self.worker.run())
 
         self.toggle_button.setText("Stop")
 
     def stop_translation(self):
         if self.worker:
-            self.worker.stop()
-            self.worker.deleteLater()
+            asyncio.create_task(self.worker.stop())
             self.worker = None
         self.toggle_button.setText("Start")
 
@@ -159,6 +158,10 @@ def main():
     app = QApplication(sys.argv)
     window = MainWindow()
     window.show()
+    loop = QEventLoop(app)
+    asyncio.set_event_loop(loop)
+    QTimer.singleShot(0, loop.quit)
+    loop.run_forever()
     sys.exit(app.exec())
 
 
